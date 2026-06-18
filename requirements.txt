@@ -1,3 +1,4 @@
 discord.py
 python-telegram-bot[ext]
 python-dotenv
+aiohttp

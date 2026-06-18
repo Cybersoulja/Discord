@@ -7,6 +7,9 @@ from dotenv import load_dotenv
 
 from bridge import Bridge
 from telegram_bot import TelegramBot
+from webhook import DiscordWebhook
+from pushcut_client import PushcutClient
+from webhook_server import WebhookServer
 
 load_dotenv()
 
@@ -21,6 +24,10 @@ DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 DISCORD_CHANNEL_ID = os.getenv("DISCORD_CHANNEL_ID")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+PUSHCUT_API_KEY = os.getenv("PUSHCUT_API_KEY")
+PUSHCUT_WIDGET_ID = os.getenv("PUSHCUT_WIDGET_ID", "taskade-agent")
+WEBHOOK_SERVER_PORT = int(os.getenv("WEBHOOK_SERVER_PORT", "8080"))
 
 
 # --- Bridge setup ---
@@ -28,6 +35,10 @@ bridge = Bridge(
     discord_channel_id=int(DISCORD_CHANNEL_ID) if DISCORD_CHANNEL_ID else None,
     telegram_chat_id=int(TELEGRAM_CHAT_ID) if TELEGRAM_CHAT_ID else None,
 )
+
+# --- Optional integrations ---
+discord_webhook = DiscordWebhook(DISCORD_WEBHOOK_URL) if DISCORD_WEBHOOK_URL else None
+pushcut = PushcutClient(api_key=PUSHCUT_API_KEY, widget_id=PUSHCUT_WIDGET_ID) if PUSHCUT_API_KEY else None
 
 
 # --- Discord client ---
@@ -37,10 +48,8 @@ class DiscordBot(discord.Client):
         logger.info(f"Discord bot logged in as {self.user}")
 
     async def on_message(self, message):
-        # Ignore messages from this bot itself
         if message.author == self.user:
             return
-        # Ignore bridged messages (sent by this bot)
         if message.author.bot:
             return
 
@@ -60,8 +69,13 @@ async def main():
         logger.error("TELEGRAM_BOT_TOKEN not set in environment")
         return
 
-    # Build Telegram bot
-    telegram = TelegramBot(token=TELEGRAM_BOT_TOKEN, bridge=bridge)
+    # Build Telegram bot with all integrations
+    telegram = TelegramBot(
+        token=TELEGRAM_BOT_TOKEN,
+        bridge=bridge,
+        discord_webhook=discord_webhook,
+        pushcut=pushcut,
+    )
     app = telegram.build()
     bridge.set_telegram_bot(telegram)
 
@@ -71,9 +85,17 @@ async def main():
     discord_client = DiscordBot(intents=intents)
     bridge.set_discord_client(discord_client)
 
-    # Run both bots concurrently
-    logger.info("Starting Discord + Telegram (@opxero) bridge...")
+    # Start webhook server for external automations (Drafts, Shortcuts, etc.)
+    server = WebhookServer(
+        port=WEBHOOK_SERVER_PORT,
+        discord_webhook=discord_webhook,
+        pushcut=pushcut,
+        bridge=bridge,
+    )
+    server_runner = await server.start()
 
+    # Start Telegram polling
+    logger.info("Starting Discord + Telegram (@opxero) bridge with automation hub...")
     await app.initialize()
     await app.start()
     await app.updater.start_polling()
@@ -84,6 +106,7 @@ async def main():
         await app.updater.stop()
         await app.stop()
         await app.shutdown()
+        await server_runner.cleanup()
 
 
 if __name__ == "__main__":

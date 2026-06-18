@@ -1,15 +1,26 @@
-# Discord-Telegram Bridge Bot
+# Discord-Telegram Automation Bridge
 
-A Python bot that bridges messages between Discord and Telegram (@opxero).
-
-Messages sent in a configured Discord channel are forwarded to a Telegram chat and vice versa.
+A Python bot bridging Discord, Telegram (@opxero), Drafts App, Pushcut, and Taskade into a unified automation hub.
 
 ## Features
 
-- Bi-directional message forwarding between Discord and Telegram
-- Configurable channel/chat mapping
-- Telegram commands: `/start`, `/status`, `/chatid`
-- Runs both bots concurrently in a single process
+- **Bi-directional bridge** between Discord and Telegram (@opxero)
+- **Hawk webhook** posts to Discord #taskade channel
+- **Drafts App integration** receives draft metadata dictionaries via webhook
+- **Pushcut widget updates** for the taskade-agent widget (`[[input0]]`, `[[input1]]`, `[[input2]]`)
+- **HTTP webhook server** receives payloads from iOS Shortcuts, Drafts actions, and other automations
+- **Telegram commands** to trigger automations from mobile
+
+## Architecture
+
+```
+bot.py              - Main entry point, runs all services concurrently
+telegram_bot.py     - Telegram bot (@opxero) with automation commands
+bridge.py           - Discord <-> Telegram message forwarding
+webhook.py          - Discord webhook client (Hawk -> #taskade)
+pushcut_client.py   - Pushcut API client (widget + notification)
+webhook_server.py   - HTTP server receiving external automation payloads
+```
 
 ## Setup
 
@@ -19,49 +30,96 @@ Messages sent in a configured Discord channel are forwarded to a Telegram chat a
 pip install -r requirements.txt
 ```
 
-### 2. Configure environment variables
-
-Copy the example env file and fill in your values:
+### 2. Configure environment
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` with your tokens and channel IDs:
-
 | Variable | Description |
 |---|---|
-| `DISCORD_BOT_TOKEN` | Your Discord bot token (from [Discord Developer Portal](https://discord.com/developers/applications)) |
-| `TELEGRAM_BOT_TOKEN` | Your Telegram bot token (from [@BotFather](https://t.me/BotFather) for @opxero) |
-| `DISCORD_CHANNEL_ID` | The Discord channel ID to bridge |
-| `TELEGRAM_CHAT_ID` | The Telegram chat ID to bridge (use `/chatid` command in Telegram to find it) |
+| `DISCORD_BOT_TOKEN` | Discord bot token |
+| `TELEGRAM_BOT_TOKEN` | @opxero token from @BotFather |
+| `DISCORD_CHANNEL_ID` | Discord channel ID to bridge |
+| `TELEGRAM_CHAT_ID` | Telegram chat ID to bridge |
+| `DISCORD_WEBHOOK_URL` | Hawk webhook URL for #taskade |
+| `PUSHCUT_API_KEY` | Pushcut API key for widget updates |
+| `PUSHCUT_WIDGET_ID` | Pushcut widget ID (default: `taskade-agent`) |
+| `WEBHOOK_SERVER_PORT` | HTTP server port (default: `8080`) |
 
-### 3. Get your Telegram Chat ID
-
-1. Start the bot without `TELEGRAM_CHAT_ID` set
-2. Send `/chatid` to @opxero on Telegram
-3. Copy the returned chat ID into your `.env` file
-
-## Running the Bot
+### 3. Run
 
 ```bash
 python bot.py
 ```
 
-Both the Discord and Telegram bots will start concurrently.
-
-## Telegram Commands
+## Telegram Commands (@opxero)
 
 | Command | Description |
 |---|---|
-| `/start` | Show welcome message and available commands |
-| `/status` | Check bridge connection status |
-| `/chatid` | Get the current chat's ID for configuration |
+| `/start` | Show help |
+| `/status` | Bridge + integration status |
+| `/chatid` | Get chat ID for config |
+| `/hawk <msg>` | Send message to #taskade via Hawk webhook |
+| `/taskade <in0> \| <in1> \| <in2>` | Update Taskade agent Pushcut widget |
+| `/notify <msg>` | Send to all channels (Discord, Telegram, Pushcut) |
 
-## Architecture
+## Webhook Endpoints
 
+The HTTP server (default port 8080) accepts automation payloads:
+
+### `POST /webhook/drafts`
+
+Receives Drafts App metadata dictionaries:
+
+```json
+{
+  "draft_metadata": {
+    "uuid": "...",
+    "title": "...",
+    "created": "...",
+    "modified": "...",
+    "tags": "...",
+    "folder": "...",
+    "flagged": "...",
+    "language": "..."
+  }
+}
 ```
-bot.py            - Main entry point, runs both bots concurrently
-telegram_bot.py   - Telegram bot (@opxero) handlers and setup
-bridge.py         - Message forwarding logic between platforms
+
+### `POST /webhook/taskade`
+
+Updates Taskade agent widget and posts to Discord:
+
+```json
+{
+  "inputs": {
+    "input0": "...",
+    "input1": "...",
+    "input2": "..."
+  }
+}
 ```
+
+### `POST /webhook/notify`
+
+Generic notification to all channels:
+
+```json
+{
+  "source": "AutomationLab",
+  "message": "Build completed successfully"
+}
+```
+
+### `GET /health`
+
+Health check endpoint.
+
+## iOS Shortcuts Integration
+
+Use these URL patterns in your Shortcuts:
+
+- **Drafts action**: POST draft metadata JSON to `http://<server>:8080/webhook/drafts`
+- **Taskade update**: POST inputs to `http://<server>:8080/webhook/taskade`
+- **Notify**: POST `{"source": "Shortcuts", "message": "..."}` to `http://<server>:8080/webhook/notify`
