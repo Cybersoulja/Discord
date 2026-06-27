@@ -45,12 +45,12 @@ webhook_server.py    WebhookServer class — aiohttp.web app exposing
                      bridge.telegram_bot are configured.
 ```
 
-Everything is wired together in `bot.py:main()`:
-1. Build `Bridge` with optional `DISCORD_CHANNEL_ID` / `TELEGRAM_CHAT_ID`.
-2. Conditionally construct `DiscordWebhook` and `PushcutClient` only if their
-   API keys/URLs are set in the environment (both are `None` otherwise).
-3. Build `TelegramBot`, then the Discord `discord.Client` subclass, then
-   `WebhookServer`, registering each with the shared `Bridge`.
+Everything is wired together in `bot.py`:
+1. At the module level, build `Bridge` with optional `DISCORD_CHANNEL_ID` / `TELEGRAM_CHAT_ID`.
+2. At the module level, conditionally construct `DiscordWebhook` and `PushcutClient`
+   only if their API keys/URLs are set in the environment (both are `None` otherwise).
+3. Inside `main()`, build `TelegramBot`, then the Discord `discord.Client` subclass,
+   then `WebhookServer`, registering each with the shared `Bridge`.
 4. Start the webhook server, start Telegram polling, then run the Discord
    client (`await discord_client.start(...)`) as the loop's main blocking call.
 5. On shutdown (loop exit), stop the Telegram app and clean up the aiohttp
