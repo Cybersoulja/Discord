@@ -90,6 +90,13 @@ Optional env vars (enable bridging/integrations when set): `DISCORD_CHANNEL_ID`,
 `TELEGRAM_CHAT_ID`, `DISCORD_WEBHOOK_URL`, `PUSHCUT_API_KEY`, `PUSHCUT_WIDGET_ID`
 (default `taskade-agent`), `WEBHOOK_SERVER_PORT` (default `8080`).
 
+`DISCORD_CHANNEL_ID` and `TELEGRAM_CHAT_ID` are cast with `int(...)` at module
+level in `bot.py` (before `main()` runs), so they can't be left as the literal
+placeholder text from `.env.example` — either delete those two lines entirely
+(falls back to `None`, i.e. bridging disabled) or replace them with real
+numeric IDs. Leaving `your_discord_channel_id_here` / `your_telegram_chat_id_here`
+in place raises `ValueError` on startup.
+
 There is no test suite, linter config, or type-checker config in this repo —
 there's nothing to run beyond `python bot.py` to sanity-check changes. Manually
 exercise changes via the Telegram commands or `curl` against the webhook
