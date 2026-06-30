@@ -10,6 +10,7 @@ from telegram_bot import TelegramBot
 from webhook import DiscordWebhook
 from pushcut_client import PushcutClient
 from webhook_server import WebhookServer
+from cyberpunk_game import CyberpunkAdventure, HELP_TEXT
 
 load_dotenv()
 
@@ -40,6 +41,9 @@ bridge = Bridge(
 discord_webhook = DiscordWebhook(DISCORD_WEBHOOK_URL) if DISCORD_WEBHOOK_URL else None
 pushcut = PushcutClient(api_key=PUSHCUT_API_KEY, widget_id=PUSHCUT_WIDGET_ID) if PUSHCUT_API_KEY else None
 
+# --- Cyberpunk Night City adventure game ---
+cyberpunk = CyberpunkAdventure()
+
 
 # --- Discord client ---
 class DiscordBot(discord.Client):
@@ -53,11 +57,40 @@ class DiscordBot(discord.Client):
         if message.author.bot:
             return
 
-        logger.info(f"[Discord] {message.author}: {message.content}")
+        content = message.content.strip()
+        channel_id = message.channel.id
+
+        # --- Cyberpunk game commands ---
+        lower = content.lower()
+        if lower in ("!cyberpunk", "!nc"):
+            response = cyberpunk.start_game(channel_id)
+            await message.channel.send(response)
+            return
+
+        if lower in ("!nc quit", "!cyberpunk quit"):
+            await message.channel.send(cyberpunk.quit_game(channel_id))
+            return
+
+        if lower in ("!nc status", "!cyberpunk status"):
+            await message.channel.send(cyberpunk.status(channel_id))
+            return
+
+        if lower in ("!nc help", "!cyberpunk help"):
+            await message.channel.send(HELP_TEXT)
+            return
+
+        # Route numeric choices to an active game session
+        if cyberpunk.has_session(channel_id) and content in ("1", "2", "3", "4"):
+            response = cyberpunk.process_input(channel_id, content)
+            if response:
+                await message.channel.send(response)
+            return
+
+        logger.info(f"[Discord] {message.author}: {content}")
         await bridge.forward_to_telegram(
             sender=str(message.author.display_name),
-            content=message.content,
-            channel_id=message.channel.id,
+            content=content,
+            channel_id=channel_id,
         )
 
 
