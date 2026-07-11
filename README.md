@@ -10,6 +10,8 @@ A Python bot bridging Discord, Telegram (@opxero), Drafts App, Pushcut, and Task
 - **Pushcut widget updates** for the taskade-agent widget (`[[input0]]`, `[[input1]]`, `[[input2]]`)
 - **HTTP webhook server** receives payloads from iOS Shortcuts, Drafts actions, and other automations
 - **Telegram commands** to trigger automations from mobile
+- **Guild.xyz integration** checks role-gated guild access and relays membership events
+- **Bot/agent chat support** lets allowlisted Discord bots and Telegram `/agent` messages bridge as agents instead of being dropped
 
 ## Architecture
 
@@ -19,6 +21,7 @@ telegram_bot.py     - Telegram bot (@opxero) with automation commands
 bridge.py           - Discord <-> Telegram message forwarding
 webhook.py          - Discord webhook client (Hawk -> #taskade)
 pushcut_client.py   - Pushcut API client (widget + notification)
+guildxyz_client.py  - Guild.xyz API client (guild info + member access)
 webhook_server.py   - HTTP server receiving external automation payloads
 ```
 
@@ -45,6 +48,9 @@ cp .env.example .env
 | `DISCORD_WEBHOOK_URL` | Hawk webhook URL for #taskade |
 | `PUSHCUT_API_KEY` | Pushcut API key for widget updates |
 | `PUSHCUT_WIDGET_ID` | Pushcut widget ID (default: `taskade-agent`) |
+| `GUILDXYZ_GUILD_ID` | Guild.xyz guild ID to check role access against |
+| `GUILDXYZ_API_KEY` | Guild.xyz API key |
+| `DISCORD_AGENT_BOT_IDS` | Comma-separated Discord bot/application IDs allowed to bridge as agents |
 | `WEBHOOK_SERVER_PORT` | HTTP server port (default: `8080`) |
 
 ### 3. Run
@@ -63,6 +69,8 @@ python bot.py
 | `/hawk <msg>` | Send message to #taskade via Hawk webhook |
 | `/taskade <in0> \| <in1> \| <in2>` | Update Taskade agent Pushcut widget |
 | `/notify <msg>` | Send to all channels (Discord, Telegram, Pushcut) |
+| `/agent <msg>` | Send a bot/agent chat message to Discord |
+| `/guild <discord_user_id>` | Check a user's Guild.xyz role access |
 
 ## Webhook Endpoints
 
@@ -109,6 +117,19 @@ Generic notification to all channels:
 {
   "source": "AutomationLab",
   "message": "Build completed successfully"
+}
+```
+
+### `POST /webhook/guildxyz`
+
+Receives a Guild.xyz role/membership event and posts it to Discord + Telegram:
+
+```json
+{
+  "event": "role_granted",
+  "userId": "discord-user-id",
+  "guildId": "guildxyz-guild-id",
+  "roleIds": ["role-id-1"]
 }
 ```
 

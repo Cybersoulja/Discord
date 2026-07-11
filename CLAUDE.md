@@ -5,19 +5,24 @@ Guidance for Claude Code (and other AI assistants) working in this repository.
 ## Project Overview
 
 This repo (`Discord`) is a small Python automation hub that bridges **Discord**,
-**Telegram** (bot `@opxero`), the iOS **Drafts** app, **Pushcut**, and **Taskade**
-into one process. It is a single long-running asyncio service, not a web app or
-library — there is no package structure, build step, or test suite.
+**Telegram** (bot `@opxero`), the iOS **Drafts** app, **Pushcut**, **Taskade**, and
+**Guild.xyz** into one process. It is a single long-running asyncio service, not a
+web app or library — there is no package structure, build step, or test suite.
 
 Core capabilities:
 - Bi-directional message bridging between a Discord channel and a Telegram chat.
-- A Telegram command interface (`/hawk`, `/taskade`, `/notify`, `/status`, `/chatid`) for
-  triggering automations from mobile.
+- A Telegram command interface (`/hawk`, `/taskade`, `/notify`, `/agent`, `/guild`,
+  `/status`, `/chatid`) for triggering automations from mobile.
 - An outbound Discord "Hawk" webhook client that posts plain messages/embeds to a
   `#taskade` channel.
 - A Pushcut client that updates a widget (`taskade-agent`) and fires notifications.
+- A Guild.xyz client that checks a Discord user's role-gated guild access.
+- Bot/agent chat support: an allowlist (`DISCORD_AGENT_BOT_IDS`) of Discord bot
+  IDs that are bridged through instead of silently dropped, plus a Telegram
+  `/agent` command for sending agent-tagged messages into Discord.
 - An inbound HTTP server (`aiohttp`) that accepts webhook payloads from iOS Shortcuts,
-  Drafts actions, and other external automations, fanning them out to Discord/Telegram/Pushcut.
+  Drafts actions, Guild.xyz, and other external automations, fanning them out to
+  Discord/Telegram/Pushcut.
 
 ## Architecture
 
@@ -30,19 +35,21 @@ bridge.py           Bridge class — holds shared state (discord_client,
                      forward_to_* methods that move messages between platforms.
 telegram_bot.py      TelegramBot class — builds the python-telegram-bot
                      Application, registers /start /status /chatid /hawk
-                     /taskade /notify commands plus a catch-all text handler
-                     that forwards to Discord via the bridge.
+                     /taskade /notify /agent /guild commands plus a catch-all
+                     text handler that forwards to Discord via the bridge.
 webhook.py           DiscordWebhook class — thin aiohttp client around a
                      Discord incoming webhook URL ("Hawk"). send(), plus
-                     higher-level send_draft() and send_taskade_update()
-                     helpers that build embeds.
+                     higher-level send_draft(), send_taskade_update(), and
+                     send_guildxyz_update() helpers that build embeds.
 pushcut_client.py    PushcutClient class — aiohttp client for the Pushcut API
                      (PUT widget inputs, POST notifications).
+guildxyz_client.py   GuildXyzClient class — aiohttp client for the Guild.xyz
+                     API (GET guild info, GET a member's role access).
 webhook_server.py    WebhookServer class — aiohttp.web app exposing
                      POST /webhook/drafts, POST /webhook/taskade,
-                     POST /webhook/notify, GET /health. Each handler fans the
-                     payload out to whichever of discord_webhook / pushcut /
-                     bridge.telegram_bot are configured.
+                     POST /webhook/notify, POST /webhook/guildxyz, GET /health.
+                     Each handler fans the payload out to whichever of
+                     discord_webhook / pushcut / bridge.telegram_bot are configured.
 ```
 
 Everything is wired together in `bot.py`:
@@ -58,12 +65,23 @@ Everything is wired together in `bot.py`:
 
 ### Optional-integration pattern
 
-`discord_webhook` and `pushcut` are **both optional** and are `None` when their
-env vars aren't set. Every call site checks `if self.discord_webhook:` /
-`if self.pushcut:` before using them — follow this pattern for any new
-integration rather than assuming it's configured. `DISCORD_BOT_TOKEN` and
-`TELEGRAM_BOT_TOKEN` are the only two genuinely required variables; `main()`
+`discord_webhook`, `pushcut`, and `guildxyz` are **all optional** and are `None`
+when their env vars aren't set. Every call site checks `if self.discord_webhook:` /
+`if self.pushcut:` / `if self.guildxyz:` before using them — follow this pattern
+for any new integration rather than assuming it's configured. `DISCORD_BOT_TOKEN`
+and `TELEGRAM_BOT_TOKEN` are the only two genuinely required variables; `main()`
 logs an error and returns early if either is missing.
+
+### Bot/agent chat pattern
+
+`DiscordBot.on_message` (in `bot.py`) drops every message from a bot account
+except those whose `message.author.id` is in `AGENT_BOT_IDS` (parsed from the
+comma-separated `DISCORD_AGENT_BOT_IDS` env var). Allowlisted agent messages are
+tagged with an `[Agent]` sender prefix before being forwarded to Telegram, so
+humans can tell agent traffic apart from human traffic in the bridged chat.
+Keep this allowlist-and-tag approach — don't bridge arbitrary bot messages, as
+that reopens the echo-loop risk the blanket `if message.author.bot: return`
+guard existed to prevent.
 
 ### Bridge guard clauses
 
@@ -88,7 +106,8 @@ python bot.py
 Required env vars: `DISCORD_BOT_TOKEN`, `TELEGRAM_BOT_TOKEN`.
 Optional env vars (enable bridging/integrations when set): `DISCORD_CHANNEL_ID`,
 `TELEGRAM_CHAT_ID`, `DISCORD_WEBHOOK_URL`, `PUSHCUT_API_KEY`, `PUSHCUT_WIDGET_ID`
-(default `taskade-agent`), `WEBHOOK_SERVER_PORT` (default `8080`).
+(default `taskade-agent`), `GUILDXYZ_GUILD_ID`, `GUILDXYZ_API_KEY`,
+`DISCORD_AGENT_BOT_IDS` (comma-separated), `WEBHOOK_SERVER_PORT` (default `8080`).
 
 `DISCORD_CHANNEL_ID` and `TELEGRAM_CHAT_ID` are cast with `int(...)` at module
 level in `bot.py` (before `main()` runs), so they can't be left as the literal
@@ -140,6 +159,7 @@ a change done.
 | POST | `/webhook/drafts` | Drafts App metadata dict (`{"draft_metadata": {...}}` or bare dict) → Discord embed + Telegram message |
 | POST | `/webhook/taskade` | Taskade agent inputs (`{"inputs": {"input0":..., "input1":..., "input2":...}}`) → Pushcut widget update + Discord embed + Telegram message |
 | POST | `/webhook/notify` | Generic `{"source": ..., "message": ...}` → Discord webhook + Telegram + Pushcut notification |
+| POST | `/webhook/guildxyz` | Guild.xyz event (`{"event", "userId", "guildId", "roleIds"}`) → Discord embed + Telegram message |
 
 This server has no authentication — it's designed to be reachable only from a
 trusted LAN/Shortcuts context. Don't add destructive or sensitive operations
@@ -148,9 +168,11 @@ to it without first raising the auth question.
 ## Telegram Commands (`telegram_bot.py`, bot `@opxero`)
 
 `/start`, `/status`, `/chatid`, `/hawk <msg>`, `/taskade <in0> | <in1> | <in2>`,
-`/notify <msg>`. Any non-command text message is forwarded to Discord through
-`Bridge.forward_to_discord`. When adding a command, register it in
-`TelegramBot.build()` alongside the existing `CommandHandler` list.
+`/notify <msg>`, `/agent <msg>` (bot/agent chat message into Discord),
+`/guild <discord_user_id>` (Guild.xyz role access lookup). Any non-command text
+message is forwarded to Discord through `Bridge.forward_to_discord`. When adding
+a command, register it in `TelegramBot.build()` alongside the existing
+`CommandHandler` list.
 
 ## CI
 
