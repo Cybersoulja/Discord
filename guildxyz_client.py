@@ -35,17 +35,31 @@ class GuildXyzClient:
             return None
 
     async def check_access(self, discord_user_id: str) -> list | None:
-        """Check which roles a Discord user has been granted in the guild."""
-        url = f"{self.base_url}/guilds/{self.guild_id}/members/{discord_user_id}"
+        """Check which roles a Discord user has been granted in the guild.
+
+        Guild.xyz's member lookup is keyed by its own internal user ID, not a
+        Discord snowflake, so this fetches the full member list and matches
+        on each member's linked Discord platform account instead.
+        """
+        url = f"{self.base_url}/guilds/{self.guild_id}/members"
 
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, headers=self._headers()) as resp:
-                    if resp.status == 200:
-                        return await resp.json()
-                    body = await resp.text()
-                    logger.error(f"Guild.xyz check_access failed ({resp.status}): {body}")
-                    return None
+                    if resp.status != 200:
+                        body = await resp.text()
+                        logger.error(f"Guild.xyz check_access failed ({resp.status}): {body}")
+                        return None
+                    members = await resp.json()
         except aiohttp.ClientError as e:
             logger.error(f"Guild.xyz check_access network error: {e}")
             return None
+
+        for member in members:
+            for platform_user in member.get("platformUsers", []):
+                platform_name = str(platform_user.get("platformName", "")).upper()
+                platform_id = str(platform_user.get("platformUserId", ""))
+                if platform_name == "DISCORD" and platform_id == str(discord_user_id):
+                    return member.get("roleIds", [])
+
+        return None

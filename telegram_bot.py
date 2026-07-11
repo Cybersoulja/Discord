@@ -115,14 +115,14 @@ class TelegramBot:
             return
         message = " ".join(context.args)
 
-        if self.discord_webhook:
-            await self.discord_webhook.send(content=message, username="Agent (via @opxero)")
-            await update.message.reply_text("Sent to Discord as an agent message.")
-        elif self.bridge:
+        if self.bridge and self.bridge.discord_channel_id:
             await self.bridge.forward_to_discord(
                 sender="Agent", content=message, chat_id=update.effective_chat.id
             )
-            await update.message.reply_text("Sent to Discord as an agent message.")
+            await update.message.reply_text("Sent to the bridged Discord channel as an agent message.")
+        elif self.discord_webhook:
+            await self.discord_webhook.send(content=message, username="Agent (via @opxero)")
+            await update.message.reply_text("Sent to #taskade via Hawk as an agent message.")
         else:
             await update.message.reply_text("No Discord integration configured for agent chat.")
 
