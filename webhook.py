@@ -82,6 +82,7 @@ class DiscordWebhook:
         for key, label in field_map.items():
             value = event.get(key)
             if value:
-                embed["fields"].append({"name": label, "value": str(value), "inline": True})
+                val_str = ", ".join(map(str, value)) if key == "roleIds" and isinstance(value, list) else str(value)
+                embed["fields"].append({"name": label, "value": val_str, "inline": True})
 
         await self.send(content=None, username="Guild.xyz", embed=embed)

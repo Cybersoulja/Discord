@@ -22,22 +22,30 @@ class GuildXyzClient:
         """Fetch the configured Guild.xyz guild's public info."""
         url = f"{self.base_url}/guilds/{self.guild_id}"
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=self._headers()) as resp:
-                if resp.status == 200:
-                    return await resp.json()
-                body = await resp.text()
-                logger.error(f"Guild.xyz get_guild failed ({resp.status}): {body}")
-                return None
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=self._headers()) as resp:
+                    if resp.status == 200:
+                        return await resp.json()
+                    body = await resp.text()
+                    logger.error(f"Guild.xyz get_guild failed ({resp.status}): {body}")
+                    return None
+        except aiohttp.ClientError as e:
+            logger.error(f"Guild.xyz get_guild network error: {e}")
+            return None
 
     async def check_access(self, discord_user_id: str) -> list | None:
         """Check which roles a Discord user has been granted in the guild."""
         url = f"{self.base_url}/guilds/{self.guild_id}/members/{discord_user_id}"
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=self._headers()) as resp:
-                if resp.status == 200:
-                    return await resp.json()
-                body = await resp.text()
-                logger.error(f"Guild.xyz check_access failed ({resp.status}): {body}")
-                return None
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=self._headers()) as resp:
+                    if resp.status == 200:
+                        return await resp.json()
+                    body = await resp.text()
+                    logger.error(f"Guild.xyz check_access failed ({resp.status}): {body}")
+                    return None
+        except aiohttp.ClientError as e:
+            logger.error(f"Guild.xyz check_access network error: {e}")
+            return None

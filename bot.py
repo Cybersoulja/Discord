@@ -36,7 +36,7 @@ WEBHOOK_SERVER_PORT = int(os.getenv("WEBHOOK_SERVER_PORT", "8080"))
 # Discord bot/application IDs allowed to bridge as agents instead of being
 # silently dropped (see DiscordBot.on_message below).
 AGENT_BOT_IDS = {
-    int(bot_id) for bot_id in DISCORD_AGENT_BOT_IDS.split(",") if bot_id.strip()
+    int(bot_id) for bot_id in DISCORD_AGENT_BOT_IDS.split(",") if bot_id.strip().isdigit()
 }
 
 

@@ -142,10 +142,12 @@ class WebhookServer:
 
             # Notify Telegram
             if self.bridge and self.bridge.telegram_bot and self.bridge.telegram_chat_id:
+                role_ids = event["roleIds"]
+                roles_str = ", ".join(role_ids) if isinstance(role_ids, list) else str(role_ids)
                 text = (
-                    f"🛡️ *Guild.xyz {event['event']}*\n"
+                    f"🛡️ Guild.xyz {event['event']}\n"
                     f"User: {event['userId']}\n"
-                    f"Roles: {event['roleIds']}"
+                    f"Roles: {roles_str}"
                 )
                 await self.bridge.telegram_bot.send_message(
                     chat_id=self.bridge.telegram_chat_id, text=text
