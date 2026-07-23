@@ -44,7 +44,11 @@ webhook.py           DiscordWebhook class — thin aiohttp client around a
 pushcut_client.py    PushcutClient class — aiohttp client for the Pushcut API
                      (PUT widget inputs, POST notifications).
 guildxyz_client.py   GuildXyzClient class — aiohttp client for the Guild.xyz
-                     API (GET guild info, GET a member's role access).
+                     API (GET guild info; check_access() fetches the full
+                     guild member list and matches on a member's linked
+                     Discord platform account, since Guild.xyz's member
+                     lookup is keyed by its own internal user ID, not a
+                     Discord snowflake).
 webhook_server.py    WebhookServer class — aiohttp.web app exposing
                      POST /webhook/drafts, POST /webhook/taskade,
                      POST /webhook/notify, POST /webhook/guildxyz, GET /health.
@@ -130,9 +134,14 @@ a change done.
   `pushcut_client.py` / `webhook.py`), not a shared/global session.
   No threads.
   - Note: `aiohttp.ClientSession()` is currently created fresh per request in
-    `webhook.py` and `pushcut_client.py` rather than reused — keep this in
-    mind if you're chasing performance, but match existing style unless asked
-    to refactor it.
+    `webhook.py`, `pushcut_client.py`, and `guildxyz_client.py` rather than
+    reused — keep this in mind if you're chasing performance, but match
+    existing style unless asked to refactor it.
+  - Note: `guildxyz_client.py` wraps its requests in `try/except
+    aiohttp.ClientError` to log and return `None` on network failures;
+    `webhook.py` and `pushcut_client.py` don't do this yet. Prefer the
+    guildxyz_client.py style (catch and log) for new network calls rather
+    than letting exceptions propagate to the caller.
 - **Logging, not printing.** Every module does
   `logger = logging.getLogger(__name__)` and logs via `logger.info/.warning/.error`.
   `bot.py` configures the root logger format once; don't add print statements
@@ -173,6 +182,12 @@ to it without first raising the auth question.
 message is forwarded to Discord through `Bridge.forward_to_discord`. When adding
 a command, register it in `TelegramBot.build()` alongside the existing
 `CommandHandler` list.
+
+`/agent` prefers `bridge.forward_to_discord` (the bridged Discord<->Telegram
+channel) over the `discord_webhook` Hawk client, falling back to Hawk only if
+no bridge channel is configured — this keeps agent chat in the same channel
+the human bridge uses rather than posting it to the separate `#taskade`
+webhook channel. Keep this priority order if you touch `agent_command`.
 
 ## CI
 
