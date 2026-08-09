@@ -87,6 +87,12 @@ curl -X POST http://localhost:8080/webhook/guildxyz \
   -H "Content-Type: application/json" \
   -d '{"event": "role_granted", "userId": "123456789", "guildId": "abc123", "roleIds": ["role-1"]}'
 
+# Look up a Discord user's Guild.xyz role access
+curl http://localhost:8080/webhook/guildxyz/123456789
+
+# Bridge + integration status
+curl http://localhost:8080/status
+
 # Health check
 curl http://localhost:8080/health
 ```

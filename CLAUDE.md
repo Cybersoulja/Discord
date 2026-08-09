@@ -51,9 +51,13 @@ guildxyz_client.py   GuildXyzClient class — aiohttp client for the Guild.xyz
                      Discord snowflake).
 webhook_server.py    WebhookServer class — aiohttp.web app exposing
                      POST /webhook/drafts, POST /webhook/taskade,
-                     POST /webhook/notify, POST /webhook/guildxyz, GET /health.
-                     Each handler fans the payload out to whichever of
-                     discord_webhook / pushcut / bridge.telegram_bot are configured.
+                     POST /webhook/notify, POST /webhook/guildxyz,
+                     GET /webhook/guildxyz/{user_id}, GET /status, GET /health.
+                     POST handlers fan the payload out to whichever of
+                     discord_webhook / pushcut / bridge.telegram_bot are
+                     configured; the GET routes are read-only queries against
+                     guildxyz / bridge.discord_ready for callers (e.g. iOS
+                     Shortcuts) that need to pull data back rather than push it.
 ```
 
 Everything is wired together in `bot.py`:
@@ -165,10 +169,12 @@ a change done.
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/health` | Health check, returns `{"status": "ok", "service": "opxero-bridge"}` |
+| GET | `/status` | Bridge/integration status: `{"discord": "connected"\|"disconnected", "hawk_webhook": bool, "pushcut": bool, "guildxyz": bool}` |
 | POST | `/webhook/drafts` | Drafts App metadata dict (`{"draft_metadata": {...}}` or bare dict) → Discord embed + Telegram message |
 | POST | `/webhook/taskade` | Taskade agent inputs (`{"inputs": {"input0":..., "input1":..., "input2":...}}`) → Pushcut widget update + Discord embed + Telegram message |
 | POST | `/webhook/notify` | Generic `{"source": ..., "message": ...}` → Discord webhook + Telegram + Pushcut notification |
 | POST | `/webhook/guildxyz` | Guild.xyz event (`{"event", "userId", "guildId", "roleIds"}`) → Discord embed + Telegram message |
+| GET | `/webhook/guildxyz/{user_id}` | Look up a Discord user's Guild.xyz role access → `{"status": "ok", "userId": ..., "roleIds": [...]}`, 404 if not found, 503 if Guild.xyz isn't configured |
 
 This server has no authentication — it's designed to be reachable only from a
 trusted LAN/Shortcuts context. Don't add destructive or sensitive operations

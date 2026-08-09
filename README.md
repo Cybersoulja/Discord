@@ -133,6 +133,33 @@ Receives a Guild.xyz role/membership event and posts it to Discord + Telegram:
 }
 ```
 
+### `GET /webhook/guildxyz/{user_id}`
+
+Looks up a Discord user's Guild.xyz role access:
+
+```json
+{
+  "status": "ok",
+  "userId": "discord-user-id",
+  "roleIds": ["role-id-1"]
+}
+```
+
+Returns `404` if the user has no Guild.xyz access, or `503` if Guild.xyz isn't configured.
+
+### `GET /status`
+
+Bridge and integration status:
+
+```json
+{
+  "discord": "connected",
+  "hawk_webhook": true,
+  "pushcut": true,
+  "guildxyz": true
+}
+```
+
 ### `GET /health`
 
 Health check endpoint.
@@ -144,3 +171,5 @@ Use these URL patterns in your Shortcuts:
 - **Drafts action**: POST draft metadata JSON to `http://<server>:8080/webhook/drafts`
 - **Taskade update**: POST inputs to `http://<server>:8080/webhook/taskade`
 - **Notify**: POST `{"source": "Shortcuts", "message": "..."}` to `http://<server>:8080/webhook/notify`
+- **Guild.xyz role lookup**: GET `http://<server>:8080/webhook/guildxyz/<discord_user_id>`
+- **Bridge status**: GET `http://<server>:8080/status`
