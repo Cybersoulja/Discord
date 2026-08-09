@@ -14,11 +14,12 @@ logger = logging.getLogger(__name__)
 class TelegramBot:
     """Telegram bot integration for @opxero."""
 
-    def __init__(self, token: str, bridge=None, discord_webhook=None, pushcut=None):
+    def __init__(self, token: str, bridge=None, discord_webhook=None, pushcut=None, guildxyz=None):
         self.token = token
         self.bridge = bridge
         self.discord_webhook = discord_webhook
         self.pushcut = pushcut
+        self.guildxyz = guildxyz
         self.application = None
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -31,7 +32,9 @@ class TelegramBot:
             "Automation Commands:\n"
             "/hawk <message> - Send via Hawk webhook to #taskade\n"
             "/taskade <input0> | <input1> | <input2> - Update Taskade agent widget\n"
-            "/notify <message> - Send to all channels"
+            "/notify <message> - Send to all channels\n"
+            "/agent <message> - Send a bot/agent chat message to Discord\n"
+            "/guild <discord_user_id> - Check a user's Guild.xyz role access"
         )
 
     async def status_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -39,12 +42,14 @@ class TelegramBot:
         discord_status = "Connected" if self.bridge and self.bridge.discord_ready else "Disconnected"
         webhook_status = "Configured" if self.discord_webhook else "Not configured"
         pushcut_status = "Configured" if self.pushcut else "Not configured"
+        guildxyz_status = "Configured" if self.guildxyz else "Not configured"
         await update.message.reply_text(
             f"Bridge Status:\n"
             f"  Telegram: Connected\n"
             f"  Discord: {discord_status}\n"
             f"  Hawk Webhook: {webhook_status}\n"
-            f"  Pushcut: {pushcut_status}"
+            f"  Pushcut: {pushcut_status}\n"
+            f"  Guild.xyz: {guildxyz_status}"
         )
 
     async def chatid_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -103,6 +108,40 @@ class TelegramBot:
 
         await update.message.reply_text("Notification sent.")
 
+    async def agent_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Send a bot/agent chat message into Discord, tagged as an agent (not a human)."""
+        if not context.args:
+            await update.message.reply_text("Usage: /agent <message>")
+            return
+        message = " ".join(context.args)
+
+        if self.bridge and self.bridge.discord_channel_id:
+            await self.bridge.forward_to_discord(
+                sender="Agent", content=message, chat_id=update.effective_chat.id
+            )
+            await update.message.reply_text("Sent to the bridged Discord channel as an agent message.")
+        elif self.discord_webhook:
+            await self.discord_webhook.send(content=message, username="Agent (via @opxero)")
+            await update.message.reply_text("Sent to #taskade via Hawk as an agent message.")
+        else:
+            await update.message.reply_text("No Discord integration configured for agent chat.")
+
+    async def guild_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Check a Discord user's Guild.xyz role access."""
+        if not self.guildxyz:
+            await update.message.reply_text("Guild.xyz not configured.")
+            return
+        if not context.args:
+            await update.message.reply_text("Usage: /guild <discord_user_id>")
+            return
+
+        discord_user_id = context.args[0]
+        access = await self.guildxyz.check_access(discord_user_id)
+        if access is None:
+            await update.message.reply_text("Could not fetch Guild.xyz access for that user.")
+        else:
+            await update.message.reply_text(f"Guild.xyz access for {discord_user_id}:\n{access}")
+
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Forward incoming Telegram messages to Discord via the bridge."""
         if update.message is None or update.message.text is None:
@@ -127,6 +166,8 @@ class TelegramBot:
         self.application.add_handler(CommandHandler("hawk", self.hawk_command))
         self.application.add_handler(CommandHandler("taskade", self.taskade_command))
         self.application.add_handler(CommandHandler("notify", self.notify_command))
+        self.application.add_handler(CommandHandler("agent", self.agent_command))
+        self.application.add_handler(CommandHandler("guild", self.guild_command))
         self.application.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message)
         )

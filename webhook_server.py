@@ -9,28 +9,44 @@ class WebhookServer:
     """HTTP server that receives automation payloads from Drafts, Pushcut, Shortcuts, etc.
 
     Endpoints:
-        POST /webhook/drafts    - Receive Drafts App metadata dictionaries
-        POST /webhook/taskade   - Receive Taskade agent input updates
-        POST /webhook/notify    - Generic notification to Discord + Telegram
-        GET  /health            - Health check
+        POST /webhook/drafts              - Receive Drafts App metadata dictionaries
+        POST /webhook/taskade             - Receive Taskade agent input updates
+        POST /webhook/notify               - Generic notification to Discord + Telegram
+        POST /webhook/guildxyz             - Receive Guild.xyz role/membership events
+        GET  /webhook/guildxyz/{user_id}   - Look up a Discord user's Guild.xyz role access
+        GET  /status                       - Bridge + integration configuration status
+        GET  /health                       - Health check
     """
 
-    def __init__(self, port: int, discord_webhook=None, pushcut=None, bridge=None):
+    def __init__(self, port: int, discord_webhook=None, pushcut=None, bridge=None, guildxyz=None):
         self.port = port
         self.discord_webhook = discord_webhook
         self.pushcut = pushcut
         self.bridge = bridge
+        self.guildxyz = guildxyz
         self.app = web.Application()
         self._setup_routes()
 
     def _setup_routes(self):
         self.app.router.add_get("/health", self.health)
+        self.app.router.add_get("/status", self.handle_status)
         self.app.router.add_post("/webhook/drafts", self.handle_drafts)
         self.app.router.add_post("/webhook/taskade", self.handle_taskade)
         self.app.router.add_post("/webhook/notify", self.handle_notify)
+        self.app.router.add_post("/webhook/guildxyz", self.handle_guildxyz)
+        self.app.router.add_get("/webhook/guildxyz/{user_id}", self.handle_guildxyz_lookup)
 
     async def health(self, request):
         return web.json_response({"status": "ok", "service": "opxero-bridge"})
+
+    async def handle_status(self, request):
+        """Report bridge connectivity and which integrations are configured."""
+        return web.json_response({
+            "discord": "connected" if self.bridge and self.bridge.discord_ready else "disconnected",
+            "hawk_webhook": bool(self.discord_webhook),
+            "pushcut": bool(self.pushcut),
+            "guildxyz": bool(self.guildxyz),
+        })
 
     async def handle_drafts(self, request):
         """Receive a Drafts App metadata dictionary and forward to Discord + Telegram."""
@@ -119,6 +135,54 @@ class WebhookServer:
         except (json.JSONDecodeError, Exception) as e:
             logger.error(f"Notify webhook error: {e}")
             return web.json_response({"status": "error", "message": str(e)}, status=400)
+
+    async def handle_guildxyz(self, request):
+        """Receive a Guild.xyz role/membership event and forward to Discord + Telegram."""
+        try:
+            body = await request.json()
+            event = {
+                "event": body.get("event", "update"),
+                "userId": body.get("userId", ""),
+                "guildId": body.get("guildId", ""),
+                "roleIds": body.get("roleIds", []),
+            }
+
+            logger.info(f"Received Guild.xyz event: {event['event']} for user {event['userId']}")
+
+            # Send to Discord via Hawk webhook
+            if self.discord_webhook:
+                await self.discord_webhook.send_guildxyz_update(event)
+
+            # Notify Telegram
+            if self.bridge and self.bridge.telegram_bot and self.bridge.telegram_chat_id:
+                role_ids = event["roleIds"]
+                roles_str = ", ".join(role_ids) if isinstance(role_ids, list) else str(role_ids)
+                text = (
+                    f"🛡️ Guild.xyz {event['event']}\n"
+                    f"User: {event['userId']}\n"
+                    f"Roles: {roles_str}"
+                )
+                await self.bridge.telegram_bot.send_message(
+                    chat_id=self.bridge.telegram_chat_id, text=text
+                )
+
+            return web.json_response({"status": "ok", "received": "guildxyz"})
+        except (json.JSONDecodeError, Exception) as e:
+            logger.error(f"Guild.xyz webhook error: {e}")
+            return web.json_response({"status": "error", "message": str(e)}, status=400)
+
+    async def handle_guildxyz_lookup(self, request):
+        """Look up a Discord user's Guild.xyz role access."""
+        if not self.guildxyz:
+            return web.json_response({"status": "error", "message": "Guild.xyz not configured"}, status=503)
+
+        user_id = request.match_info["user_id"]
+        access = await self.guildxyz.check_access(user_id)
+        if access is None:
+            return web.json_response(
+                {"status": "error", "message": "no Guild.xyz access found for that user"}, status=404
+            )
+        return web.json_response({"status": "ok", "userId": user_id, "roleIds": access})
 
     async def start(self):
         """Start the webhook server."""

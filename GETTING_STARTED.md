@@ -36,6 +36,8 @@ DISCORD_CHANNEL_ID=123456789          # Bridge messages from this Discord channe
 TELEGRAM_CHAT_ID=987654321            # Bridge messages to this Telegram chat
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...   # Hawk webhook for #taskade
 PUSHCUT_API_KEY=your_key              # Pushcut widget updates
+GUILDXYZ_GUILD_ID=your_guild_id       # Guild.xyz role access checks
+DISCORD_AGENT_BOT_IDS=111,222         # Allow these bot IDs to bridge as agents
 ```
 
 > **Tip:** Don't know your Telegram chat ID? Start the bot first, then send `/chatid` to @opxero.
@@ -63,6 +65,8 @@ Discord bot logged in as YourBot#1234
 /status          → Check all connections
 /hawk Hello!     → Posts "Hello!" to Discord #taskade
 /notify Test     → Broadcasts to Discord + Pushcut
+/agent Hi there  → Posts "Hi there" to Discord tagged as an agent message
+/guild 123456789 → Check that Discord user's Guild.xyz role access
 ```
 
 **From a Shortcut or curl:**
@@ -77,6 +81,17 @@ curl -X POST http://localhost:8080/webhook/drafts \
 curl -X POST http://localhost:8080/webhook/taskade \
   -H "Content-Type: application/json" \
   -d '{"inputs": {"input0": "Status", "input1": "Active", "input2": "3 tasks"}}'
+
+# Send a Guild.xyz role event
+curl -X POST http://localhost:8080/webhook/guildxyz \
+  -H "Content-Type: application/json" \
+  -d '{"event": "role_granted", "userId": "123456789", "guildId": "abc123", "roleIds": ["role-1"]}'
+
+# Look up a Discord user's Guild.xyz role access
+curl http://localhost:8080/webhook/guildxyz/123456789
+
+# Bridge + integration status
+curl http://localhost:8080/status
 
 # Health check
 curl http://localhost:8080/health
@@ -111,4 +126,6 @@ With the JSON body:
 | Telegram not receiving messages | Run `/chatid`, then set `TELEGRAM_CHAT_ID` in `.env` |
 | Hawk webhook not working | Verify `DISCORD_WEBHOOK_URL` matches your webhook settings |
 | Pushcut not updating | Confirm `PUSHCUT_API_KEY` is valid in Pushcut app settings |
+| `/guild` says "not configured" | Set `GUILDXYZ_GUILD_ID` (and `GUILDXYZ_API_KEY` if required) in `.env` |
+| Agent bot messages not bridging | Add the bot's Discord application/user ID to `DISCORD_AGENT_BOT_IDS` |
 | Port 8080 in use | Set `WEBHOOK_SERVER_PORT=9090` in `.env` |

@@ -9,6 +9,7 @@ from bridge import Bridge
 from telegram_bot import TelegramBot
 from webhook import DiscordWebhook
 from pushcut_client import PushcutClient
+from guildxyz_client import GuildXyzClient
 from webhook_server import WebhookServer
 
 load_dotenv()
@@ -27,7 +28,16 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 PUSHCUT_API_KEY = os.getenv("PUSHCUT_API_KEY")
 PUSHCUT_WIDGET_ID = os.getenv("PUSHCUT_WIDGET_ID", "taskade-agent")
+GUILDXYZ_GUILD_ID = os.getenv("GUILDXYZ_GUILD_ID")
+GUILDXYZ_API_KEY = os.getenv("GUILDXYZ_API_KEY")
+DISCORD_AGENT_BOT_IDS = os.getenv("DISCORD_AGENT_BOT_IDS", "")
 WEBHOOK_SERVER_PORT = int(os.getenv("WEBHOOK_SERVER_PORT", "8080"))
+
+# Discord bot/application IDs allowed to bridge as agents instead of being
+# silently dropped (see DiscordBot.on_message below).
+AGENT_BOT_IDS = {
+    int(bot_id) for bot_id in DISCORD_AGENT_BOT_IDS.split(",") if bot_id.strip().isdigit()
+}
 
 
 # --- Bridge setup ---
@@ -39,6 +49,7 @@ bridge = Bridge(
 # --- Optional integrations ---
 discord_webhook = DiscordWebhook(DISCORD_WEBHOOK_URL) if DISCORD_WEBHOOK_URL else None
 pushcut = PushcutClient(api_key=PUSHCUT_API_KEY, widget_id=PUSHCUT_WIDGET_ID) if PUSHCUT_API_KEY else None
+guildxyz = GuildXyzClient(guild_id=GUILDXYZ_GUILD_ID, api_key=GUILDXYZ_API_KEY) if GUILDXYZ_GUILD_ID else None
 
 
 # --- Discord client ---
@@ -50,12 +61,15 @@ class DiscordBot(discord.Client):
     async def on_message(self, message):
         if message.author == self.user:
             return
-        if message.author.bot:
+        if message.author.bot and message.author.id not in AGENT_BOT_IDS:
             return
 
-        logger.info(f"[Discord] {message.author}: {message.content}")
+        is_agent = message.author.bot
+        sender = f"[Agent] {message.author.display_name}" if is_agent else str(message.author.display_name)
+
+        logger.info(f"[Discord]{' [agent]' if is_agent else ''} {message.author}: {message.content}")
         await bridge.forward_to_telegram(
-            sender=str(message.author.display_name),
+            sender=sender,
             content=message.content,
             channel_id=message.channel.id,
         )
@@ -75,6 +89,7 @@ async def main():
         bridge=bridge,
         discord_webhook=discord_webhook,
         pushcut=pushcut,
+        guildxyz=guildxyz,
     )
     app = telegram.build()
     bridge.set_telegram_bot(telegram)
@@ -91,6 +106,7 @@ async def main():
         discord_webhook=discord_webhook,
         pushcut=pushcut,
         bridge=bridge,
+        guildxyz=guildxyz,
     )
     server_runner = await server.start()
 
