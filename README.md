@@ -1,15 +1,26 @@
-# Discord Bot
+# Discord-Telegram Automation Bridge
 
-A feature-rich Discord bot built with Python using discord.py.
+A Python bot bridging Discord, Telegram (@opxero), Drafts App, Pushcut, and Taskade into a unified automation hub.
 
 ## Features
 
-- **Command handling** - Process Discord commands with `!` prefix
-- **Event logging** - Track messages, member joins/leaves, and reactions
-- **Member events** - Welcome messages when members join the server
-- **Reaction tracking** - Log user reactions on messages
-- **Error handling** - Comprehensive error handling and feedback
-- **Configurable logging** - Adjustable log levels via environment variables
+- **Bi-directional bridge** between Discord and Telegram (@opxero)
+- **Hawk webhook** posts to Discord #taskade channel
+- **Drafts App integration** receives draft metadata dictionaries via webhook
+- **Pushcut widget updates** for the taskade-agent widget (`[[input0]]`, `[[input1]]`, `[[input2]]`)
+- **HTTP webhook server** receives payloads from iOS Shortcuts, Drafts actions, and other automations
+- **Telegram commands** to trigger automations from mobile
+
+## Architecture
+
+```
+bot.py              - Main entry point, runs all services concurrently
+telegram_bot.py     - Telegram bot (@opxero) with automation commands
+bridge.py           - Discord <-> Telegram message forwarding
+webhook.py          - Discord webhook client (Hawk -> #taskade)
+pushcut_client.py   - Pushcut API client (widget + notification)
+webhook_server.py   - HTTP server receiving external automation payloads
+```
 
 ## Setup
 
@@ -19,75 +30,96 @@ A feature-rich Discord bot built with Python using discord.py.
 pip install -r requirements.txt
 ```
 
-### 2. Configure environment variables
+### 2. Configure environment
 
-Copy the example environment file:
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` and add your Discord bot token:
-```
-BOT_TOKEN=your_actual_bot_token_here
-LOG_LEVEL=INFO
-```
+| Variable | Description |
+|---|---|
+| `DISCORD_BOT_TOKEN` | Discord bot token |
+| `TELEGRAM_BOT_TOKEN` | @opxero token from @BotFather |
+| `DISCORD_CHANNEL_ID` | Discord channel ID to bridge |
+| `TELEGRAM_CHAT_ID` | Telegram chat ID to bridge |
+| `DISCORD_WEBHOOK_URL` | Hawk webhook URL for #taskade |
+| `PUSHCUT_API_KEY` | Pushcut API key for widget updates |
+| `PUSHCUT_WIDGET_ID` | Pushcut widget ID (default: `taskade-agent`) |
+| `WEBHOOK_SERVER_PORT` | HTTP server port (default: `8080`) |
 
-**Note:** Never commit the `.env` file to version control. It's in `.gitignore` by default.
+### 3. Run
 
-### 3. Get your Discord Bot Token
-
-1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
-2. Click "New Application"
-3. Go to "Bot" section and click "Add Bot"
-4. Under TOKEN section, click "Copy" to copy your bot token
-5. Paste it in your `.env` file
-
-## Running the Bot
-
-Start the bot with:
 ```bash
 python bot.py
 ```
 
-You should see output like:
+## Telegram Commands (@opxero)
+
+| Command | Description |
+|---|---|
+| `/start` | Show help |
+| `/status` | Bridge + integration status |
+| `/chatid` | Get chat ID for config |
+| `/hawk <msg>` | Send message to #taskade via Hawk webhook |
+| `/taskade <in0> \| <in1> \| <in2>` | Update Taskade agent Pushcut widget |
+| `/notify <msg>` | Send to all channels (Discord, Telegram, Pushcut) |
+
+## Webhook Endpoints
+
+The HTTP server (default port 8080) accepts automation payloads:
+
+### `POST /webhook/drafts`
+
+Receives Drafts App metadata dictionaries:
+
+```json
+{
+  "draft_metadata": {
+    "uuid": "...",
+    "title": "...",
+    "created": "...",
+    "modified": "...",
+    "tags": "...",
+    "folder": "...",
+    "flagged": "...",
+    "language": "..."
+  }
+}
 ```
-INFO:discord.client:Logging in as YourBotName#1234
-INFO:__main__:Logged in as YourBotName#1234
-INFO:__main__:Bot is in 1 guild(s)
+
+### `POST /webhook/taskade`
+
+Updates Taskade agent widget and posts to Discord:
+
+```json
+{
+  "inputs": {
+    "input0": "...",
+    "input1": "...",
+    "input2": "..."
+  }
+}
 ```
 
-## Available Commands
+### `POST /webhook/notify`
 
-- `!hello` - Say hello to the bot
-- `!ping` - Check bot latency
-- `!help_custom` - Display all available commands
+Generic notification to all channels:
 
-## Bot Events
+```json
+{
+  "source": "AutomationLab",
+  "message": "Build completed successfully"
+}
+```
 
-The bot tracks and logs the following events:
+### `GET /health`
 
-- **Messages** - Logs all messages sent in servers where bot has access
-- **Member Join** - Sends welcome message and logs when members join
-- **Member Leave** - Logs when members leave the server
-- **Reactions** - Logs when reactions are added or removed from messages
-- **Errors** - Comprehensive error handling with user-friendly error messages
+Health check endpoint.
 
-## Configuration
+## iOS Shortcuts Integration
 
-You can adjust the bot behavior through the `.env` file:
+Use these URL patterns in your Shortcuts:
 
-- `BOT_TOKEN` - Your Discord bot token (required)
-- `LOG_LEVEL` - Logging verbosity (DEBUG, INFO, WARNING, ERROR, CRITICAL) - default: INFO
-
-## Project Structure
-
-- `bot.py` - Main bot implementation with all handlers and commands
-- `requirements.txt` - Python dependencies
-- `.env.example` - Example environment configuration
-- `.gitignore` - Files to exclude from version control
-- `README.md` - This file
-- `CLAUDE.md` - Context for AI assistants working on this project
-
-## Development
-
-For more detailed information about the project structure and development guidelines, see `CLAUDE.md`.
+- **Drafts action**: POST draft metadata JSON to `http://<server>:8080/webhook/drafts`
+- **Taskade update**: POST inputs to `http://<server>:8080/webhook/taskade`
+- **Notify**: POST `{"source": "Shortcuts", "message": "..."}` to `http://<server>:8080/webhook/notify`

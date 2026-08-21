@@ -1,148 +1,113 @@
-import discord
+import asyncio
 import logging
 import os
-from dotenv import load_dotenv
-from discord.ext import commands
 
-# Load environment variables
+import discord
+from dotenv import load_dotenv
+
+from bridge import Bridge
+from telegram_bot import TelegramBot
+from webhook import DiscordWebhook
+from pushcut_client import PushcutClient
+from webhook_server import WebhookServer
+
 load_dotenv()
 
-# Configure logging
-log_level = os.getenv('LOG_LEVEL', 'INFO')
 logging.basicConfig(
-    level=getattr(logging, log_level),
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# Get bot token from environment
-BOT_TOKEN = os.getenv('BOT_TOKEN')
-
-if not BOT_TOKEN or BOT_TOKEN == 'YOUR_BOT_TOKEN_HERE':
-    logger.error('BOT_TOKEN not set in .env file!')
-    raise ValueError('BOT_TOKEN is required. Please set it in your .env file.')
-
-# Set up intents
-intents = discord.Intents.default()
-intents.message_content = True
-intents.members = True
-intents.reactions = True
-
-# Create bot instance
-bot = commands.Bot(command_prefix='!', intents=intents)
+# Configuration from environment
+DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+DISCORD_CHANNEL_ID = os.getenv("DISCORD_CHANNEL_ID")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+PUSHCUT_API_KEY = os.getenv("PUSHCUT_API_KEY")
+PUSHCUT_WIDGET_ID = os.getenv("PUSHCUT_WIDGET_ID", "taskade-agent")
+WEBHOOK_SERVER_PORT = int(os.getenv("WEBHOOK_SERVER_PORT", "8080"))
 
 
-@bot.event
-async def on_ready():
-    """Handler called when bot successfully logs in"""
-    logger.info(f'Logged in as {bot.user}')
-    logger.info(f'Bot is in {len(bot.guilds)} guild(s)')
+# --- Bridge setup ---
+bridge = Bridge(
+    discord_channel_id=int(DISCORD_CHANNEL_ID) if DISCORD_CHANNEL_ID else None,
+    telegram_chat_id=int(TELEGRAM_CHAT_ID) if TELEGRAM_CHAT_ID else None,
+)
+
+# --- Optional integrations ---
+discord_webhook = DiscordWebhook(DISCORD_WEBHOOK_URL) if DISCORD_WEBHOOK_URL else None
+pushcut = PushcutClient(api_key=PUSHCUT_API_KEY, widget_id=PUSHCUT_WIDGET_ID) if PUSHCUT_API_KEY else None
 
 
-@bot.event
-async def on_message(message):
-    """Handler called when bot receives a message"""
-    # Ignore messages from the bot itself
-    if message.author == bot.user:
+# --- Discord client ---
+class DiscordBot(discord.Client):
+    async def on_ready(self):
+        bridge.discord_ready = True
+        logger.info(f"Discord bot logged in as {self.user}")
+
+    async def on_message(self, message):
+        if message.author == self.user:
+            return
+        if message.author.bot:
+            return
+
+        logger.info(f"[Discord] {message.author}: {message.content}")
+        await bridge.forward_to_telegram(
+            sender=str(message.author.display_name),
+            content=message.content,
+            channel_id=message.channel.id,
+        )
+
+
+async def main():
+    if not DISCORD_BOT_TOKEN:
+        logger.error("DISCORD_BOT_TOKEN not set in environment")
+        return
+    if not TELEGRAM_BOT_TOKEN:
+        logger.error("TELEGRAM_BOT_TOKEN not set in environment")
         return
 
-    logger.info(f'Message from {message.author} in {message.guild}/{message.channel}: {message.content}')
-
-    # Process commands
-    await bot.process_commands(message)
-
-
-@bot.command(name='hello')
-async def hello(ctx):
-    """Simple hello command"""
-    logger.info(f'Hello command invoked by {ctx.author}')
-    await ctx.send(f'Hello, {ctx.author.name}! 👋')
-
-
-@bot.command(name='ping')
-async def ping(ctx):
-    """Ping command to check bot latency"""
-    latency = bot.latency * 1000  # Convert to milliseconds
-    logger.info(f'Ping command invoked by {ctx.author}')
-    await ctx.send(f'Pong! 🏓 Latency: {latency:.2f}ms')
-
-
-@bot.command(name='help_custom')
-async def help_custom(ctx):
-    """Display available commands"""
-    logger.info(f'Help command invoked by {ctx.author}')
-
-    embed = discord.Embed(
-        title='Available Commands',
-        description='Here are the commands I can respond to:',
-        color=discord.Color.blue()
+    # Build Telegram bot with all integrations
+    telegram = TelegramBot(
+        token=TELEGRAM_BOT_TOKEN,
+        bridge=bridge,
+        discord_webhook=discord_webhook,
+        pushcut=pushcut,
     )
-    embed.add_field(name='!hello', value='Say hello to the bot', inline=False)
-    embed.add_field(name='!ping', value='Check bot latency', inline=False)
-    embed.add_field(name='!help_custom', value='Show this help message', inline=False)
+    app = telegram.build()
+    bridge.set_telegram_bot(telegram)
 
-    await ctx.send(embed=embed)
+    # Build Discord bot
+    intents = discord.Intents.default()
+    intents.message_content = True
+    discord_client = DiscordBot(intents=intents)
+    bridge.set_discord_client(discord_client)
 
+    # Start webhook server for external automations (Drafts, Shortcuts, etc.)
+    server = WebhookServer(
+        port=WEBHOOK_SERVER_PORT,
+        discord_webhook=discord_webhook,
+        pushcut=pushcut,
+        bridge=bridge,
+    )
+    server_runner = await server.start()
 
-@bot.event
-async def on_member_join(member):
-    """Handler called when a member joins the server"""
-    logger.info(f'{member} joined {member.guild}')
+    # Start Telegram polling
+    logger.info("Starting Discord + Telegram (@opxero) bridge with automation hub...")
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
 
-    # Optional: Send a welcome message to the first text channel
-    for channel in member.guild.text_channels:
-        if channel.permissions_for(member.guild.me).send_messages:
-            await channel.send(f'Welcome to the server, {member.mention}! 👋')
-            break
-
-
-@bot.event
-async def on_member_remove(member):
-    """Handler called when a member leaves the server"""
-    logger.info(f'{member} left {member.guild}')
-
-
-@bot.event
-async def on_reaction_add(reaction, user):
-    """Handler called when a reaction is added to a message"""
-    if user == bot.user:
-        return
-
-    logger.info(f'{user} reacted with {reaction.emoji} to message in {reaction.message.channel}')
-
-
-@bot.event
-async def on_reaction_remove(reaction, user):
-    """Handler called when a reaction is removed from a message"""
-    if user == bot.user:
-        return
-
-    logger.info(f'{user} removed {reaction.emoji} reaction from message in {reaction.message.channel}')
-
-
-@bot.event
-async def on_command_error(ctx, error):
-    """Global error handler for commands"""
-    if isinstance(error, commands.CommandNotFound):
-        logger.warning(f'Unknown command from {ctx.author}: {ctx.message.content}')
-        await ctx.send(f'Unknown command. Use `!help_custom` for available commands.')
-    elif isinstance(error, commands.MissingRequiredArgument):
-        logger.warning(f'Missing arguments from {ctx.author}: {ctx.message.content}')
-        await ctx.send(f'Missing required arguments. Use `!help_custom` for more info.')
-    else:
-        logger.error(f'Command error from {ctx.author}: {error}')
-        await ctx.send(f'An error occurred while processing the command. Please try again.')
-
-
-def main():
-    """Main entry point"""
     try:
-        logger.info('Starting Discord bot...')
-        bot.run(BOT_TOKEN)
-    except Exception as e:
-        logger.error(f'Failed to start bot: {e}')
-        raise
+        await discord_client.start(DISCORD_BOT_TOKEN)
+    finally:
+        await app.updater.stop()
+        await app.stop()
+        await app.shutdown()
+        await server_runner.cleanup()
 
 
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    asyncio.run(main())
